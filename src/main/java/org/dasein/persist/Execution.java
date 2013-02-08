@@ -128,6 +128,7 @@ public abstract class Execution {
     private static class ExecutionTask implements Runnable {
         @Override
         public void run() {
+            Thread.currentThread().setDaemon(true);
             pushExecutions();
         }
     }
