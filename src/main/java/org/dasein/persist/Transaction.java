@@ -65,10 +65,6 @@ public class Transaction {
      */
     static private final AtomicInteger connections = new AtomicInteger(0);
     /**
-     * The most transactions ever open at a single time.
-     */
-    static private final AtomicInteger highPoint = new AtomicInteger(0);
-    /**
      * The next transaction ID to use.
      */
     static private final AtomicInteger nextTransactionId = new AtomicInteger(0);
@@ -108,7 +104,7 @@ public class Transaction {
             int count;
             
             if( logger.isInfoEnabled() ) {
-                logger.info("There are " + connections.get() + " open connections right now (high point: " + highPoint.get() + ").");
+                logger.info("There are " + connections.get() + " open connections right now");
             }
             try { Thread.sleep(1000L); }
             catch( InterruptedException ignore ) { /* ignore me */ }
@@ -251,11 +247,12 @@ public class Transaction {
         MemoryMXBean bean = ManagementFactory.getMemoryMXBean();
 
         StringBuilder sb = new StringBuilder();
-        sb.append("Dasein Connection Report (" + new Date() + "):");
-        sb.append("Open connections: " + connections.get());
-        sb.append(", High connections: " + highPoint.get());
-        sb.append(", Transaction cache size: " + transactions.size());
-        sb.append(", Event cache size: " + eventCache.size());
+        sb.append("Dasein Connection Report (" + new Date() + "): ");
+        if (tracking) {
+            sb.append("Open connections: " + connections.get() + ", ");
+            sb.append("Transaction cache size: " + transactions.size() + ", ");
+        }
+        sb.append("Event cache size: " + eventCache.size());
         sb.append(", Heap memory usage: " + bean.getHeapMemoryUsage());
         sb.append(", Non-heap memory usage: " + bean.getNonHeapMemoryUsage());
         sb.append(", Free memory: " + (Runtime.getRuntime().freeMemory() / 1024000L) + "MB");
@@ -315,14 +312,12 @@ public class Transaction {
      * it is rolled back.
      */
     public void close() {
-        logger.debug("enter - close()");
         try {
             state = "CLOSING";
             if( connection != null ) {
-                logger.warn("Connection not committed, rolling back.");
+                logger.warn("Transaction " + transactionId + " not committed, rolling back.");
                 rollback();
             }
-            logger.debug("Closing all open events.");
             if( !events.empty() ) {
                 state = "CLOSING EVENTS";
                 do {
@@ -343,16 +338,11 @@ public class Transaction {
                 } while( !events.empty() );
             }
             state = "CLOSED";
-            logger.debug("return - close()");
         }
         finally {
             if (tracking) {
-                if( logger.isDebugEnabled() ) {
-                    logger.debug("Removing transaction: " + transactionId);
-                }
                 transactions.remove(new Integer(transactionId));
             }
-            logger.debug("exit - close()");
             events.clear();
             statements.clear();
             stackTrace = null;
@@ -368,36 +358,26 @@ public class Transaction {
      * during the commit
      */
     public void commit() throws PersistenceException {
-        logger.debug("enter - commit()");
         try {
             if( connection == null ) {
                 if( dirty ) {
                     throw new PersistenceException("Attempt to commit a committed or aborted transaction.");
                 }       
-                logger.debug("return as no-op - commit()");
                 return;
             }
             state = "COMMITTING";
             try {
-                if( logger.isDebugEnabled() ) {
-                    logger.debug("Committing: " + transactionId);
-                }
                 connection.commit();
                 state = "CLOSING CONNECTIONS";
                 connection.close();
                 connection = null;
-                logger.warn(connectionCloseLog());
-                if (tracking) {
-                    final int numConnections = connections.decrementAndGet();
-                    if( logger.isInfoEnabled() ) {
-                        logger.info("Reduced the number of connections from " + (numConnections+1) + " due to commit.");
-                    }
+                if (logger.isDebugEnabled()) {
+                    logger.debug(connectionCloseLog());
                 }
-                if( logger.isDebugEnabled() ) {
-                    logger.debug("Releasing: " + transactionId);
+                if (tracking) {
+                    connections.decrementAndGet();
                 }
                 close();
-                logger.debug("return - commit()");
             }
             catch( SQLException e ) {
                 throw new PersistenceException(e.getMessage());
@@ -411,7 +391,6 @@ public class Transaction {
             }
         }
         finally {
-            logger.debug("exit - commit()");
         }
     }
 
@@ -420,7 +399,6 @@ public class Transaction {
     }
     
     public Map<String,Object> execute(Class<? extends Execution> cls, Map<String,Object> args, String dsn) throws PersistenceException {
-        logger.debug("enter - execute(Class,Map)");
         try {
             StringBuilder holder = new StringBuilder();
             boolean success = false;
@@ -432,9 +410,6 @@ public class Transaction {
                 Map<String,Object> res;
                 
                 if( connection == null ) {
-                    if( logger.isDebugEnabled() ) {
-                        logger.debug("New connection: " + transactionId);
-                    }
                     open(event, dsn);
                 }
                 /*
@@ -452,7 +427,6 @@ public class Transaction {
                 events.push(event);
                 statements.push(holder.toString());
                 success = true;
-                logger.debug("return - execute(Execution, Map)");
                 state = "AWAITING COMMIT: " + holder.toString();
                 return res;
             }
@@ -505,12 +479,10 @@ public class Transaction {
             }
         }
         finally {
-            logger.debug("exit - execute(Class,Map)");
         }
     }
     
     public Map<String,Object> execute(Execution event, Map<String,Object> args, String dsn) throws PersistenceException {
-        logger.debug("enter - execute(Class,Map)");
         try {
             StringBuilder holder = new StringBuilder();
             boolean success = false;
@@ -521,9 +493,6 @@ public class Transaction {
                 Map<String,Object> res;
                 
                 if( connection == null ) {
-                    if( logger.isDebugEnabled() ) {
-                        logger.debug("New connection: " + transactionId);
-                    }
                     open(event, dsn);
                 }
                 //stateargs = event.loadStatement(connection, args);
@@ -534,7 +503,6 @@ public class Transaction {
                 statements.push(holder.toString());
                 success = true;
                 state = "AWAITING COMMIT: " + holder.toString();
-                logger.debug("return - execute(Execution, Map)");
                 return res;
             }
             catch( SQLException e ) {
@@ -568,7 +536,6 @@ public class Transaction {
             }
         }
         finally {
-            logger.debug("exit - execute(Class,Map)");
         }
     }
     
@@ -649,7 +616,6 @@ public class Transaction {
      * @throws PersistenceException
      */
     private synchronized void open(Execution event, String dsn) throws SQLException, PersistenceException {
-        logger.debug("enter - open(Execution)");
         try {
             Connection conn;
             
@@ -657,9 +623,6 @@ public class Transaction {
                 return;
             }
             state = "OPENING";
-            if( logger.isDebugEnabled() ) {
-                logger.debug("Opening " + transactionId);
-            }
             try {
                 InitialContext ctx = new InitialContext();
                 DataSource ds;
@@ -671,10 +634,9 @@ public class Transaction {
                 ds = (DataSource)ctx.lookup(dsn);
                 conn = ds.getConnection();
                 openTime = System.currentTimeMillis();
-                logger.warn("DPTRANSID-" + transactionId + " connection.get - dsn='" + dsn + '\'');
                 if( logger.isDebugEnabled() ) {
-                    logger.debug("Got connection for " + transactionId + ": " + conn);
-                }            
+                    logger.debug("DPTRANSID-" + transactionId + " connection.get - dsn='" + dsn + '\'');
+                }
                 state = "CONNECTED";
             }
             catch( NamingException e ) {
@@ -685,24 +647,11 @@ public class Transaction {
             conn.setReadOnly(readOnly);
             connection = conn;
             if (tracking) {
-                final int numConnections = connections.incrementAndGet();
-                final int numHighPoint = highPoint.get();
-                if( logger.isInfoEnabled() ) {
-                    logger.info("Incremented connection count to " + numConnections);
-                }
-                if( numConnections > numHighPoint) {
-                    if (highPoint.compareAndSet(numHighPoint, numConnections)) {
-                        if( logger.isInfoEnabled() ) {
-                            logger.info("A NEW CONNECTION HIGH POINT HAS BEEN REACHED: " + highPoint);
-                        }
-                    }
-                }
+                connections.incrementAndGet();
                 transactions.put(new Integer(transactionId), this);
             }
-            logger.debug("return - open(Execution)");
         }
         finally {
-            logger.debug("exit - open(Execution)");
         }
     }
 
@@ -763,7 +712,6 @@ public class Transaction {
 
     protected void rollback(boolean cancelStatements) {
 
-        logger.debug("enter - rollback()");
         try {
             if( connection == null ) {
                 return;
@@ -792,7 +740,6 @@ public class Transaction {
                 }
             }
             state = "ROLLING BACK";
-            logger.debug("Rolling back JDBC connection: " + transactionId);
             try {
                 connection.rollback();
             }
@@ -809,17 +756,12 @@ public class Transaction {
             }
             connection = null;
             if (tracking) {
-                final int numConnections = connections.decrementAndGet();
-                if( logger.isInfoEnabled() ) {
-                    logger.info("Reducing the number of connections from " + (numConnections+1) + " due to rollback.");
-                }
+                connections.decrementAndGet();
             }
             close();
             dirty = true;
-            logger.debug("return - rollback()");
         }
         finally {
-            logger.debug("exit - rollback()");
         }
     }
 
