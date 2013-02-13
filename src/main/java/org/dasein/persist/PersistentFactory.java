@@ -56,12 +56,11 @@ import org.dasein.persist.xml.XMLWriter;
 import org.dasein.util.CacheLoader;
 import org.dasein.util.CacheManagementException;
 import org.dasein.util.ConcurrentMultiCache;
-import org.dasein.util.DaseinUtilProperties;
+import org.dasein.util.DaseinUtilTasks;
 import org.dasein.util.JitCollection;
 import org.dasein.util.Jiterator;
 import org.dasein.util.JiteratorFilter;
 import org.dasein.util.Translator;
-import org.dasein.util.tasks.DaseinUtilTasks;
 
 /**
  * <p>
@@ -1756,60 +1755,7 @@ public final class PersistentFactory<T> {
                 
                 results = xaction.execute(cls, params);
                 xaction.commit();
-                if (DaseinUtilProperties.isTaskSystemEnabled()) {
-                    DaseinUtilTasks.submit(new PersistentFactoryTask(it, results));
-                    return new JitCollection<T>(it, cache.getTarget().getName());
-                }
-                Thread t = new Thread() {
-                    public void run() {
-                        try {
-                            for( Map<String,Object> map: (Collection<Map<String,Object>>)results.get(LISTING) ) {
-                                T item = null;
-                                
-                                if( singletons.size() > 0 ) {
-                                    for( String key : singletons.keySet() ) {
-                                        Object ob = map.get(key);
-                                        
-                                        if( ob instanceof java.math.BigDecimal ) {
-                                            java.math.BigDecimal tmp = (java.math.BigDecimal)ob;
-                                            
-                                            ob = tmp.longValue();
-                                            map.put(key, ob);
-                                        }
-                                        item = cache.find(key, ob);
-                                        if( item != null ) {
-                                            break;
-                                        }
-                                    }
-                                }
-                                if( item == null ) {
-                                    if( dependency != null ) {
-                                        try {
-                                            dependency.loadDependencies(map);
-                                        }
-                                        catch( PersistenceException e ) {
-                                            it.setLoadException(e);
-                                            return;
-                                        }
-                                    }
-                                    item = cache.find(map);
-                                }
-                                it.push(item);
-                            }
-                            it.complete();
-                        }
-                        catch( Exception e ) {
-                            it.setLoadException(e);
-                        }
-                        catch( Throwable t ) {
-                            it.setLoadException(new RuntimeException(t));
-                        }
-                    }
-                };
-                
-                t.setDaemon(true);
-                t.setName("Loader");
-                t.start();
+                DaseinUtilTasks.submit(new PersistentFactoryTask(it, results));
                 return new JitCollection<T>(it, cache.getTarget().getName());
             }
             catch( PersistenceException e ) {

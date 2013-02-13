@@ -43,9 +43,8 @@ import org.apache.log4j.Logger;
 import org.dasein.persist.dao.LoadTranslator;
 import org.dasein.persist.dao.RemoveTranslator;
 import org.dasein.persist.dao.SaveTranslator;
-import org.dasein.util.DaseinUtilProperties;
 import org.dasein.util.Translator;
-import org.dasein.util.tasks.DaseinUtilTasks;
+import org.dasein.util.DaseinUtilTasks;
 
 /**
  * Represents a database event, generally a specific query or update.
@@ -109,26 +108,12 @@ public abstract class Execution {
             logger.error("Problem reading " + PROPERTIES + ": " + e.getMessage(), e);
         }
 
-        if (DaseinUtilProperties.isTaskSystemEnabled()) {
-            DaseinUtilTasks.submit(new ExecutionTask());
-        } else {
-            Thread stackPusher = new Thread() {
-                public void run() {
-                    pushExecutions();
-                }
-            };
-
-            stackPusher.setPriority(Thread.NORM_PRIORITY-1);
-            stackPusher.setDaemon(true);
-            stackPusher.setName("dasein-persistence - STACK PUSHER");
-            stackPusher.start();
-        }
+        DaseinUtilTasks.submit(new ExecutionTask());
     }
 
     private static class ExecutionTask implements Runnable {
         @Override
         public void run() {
-            Thread.currentThread().setDaemon(true);
             pushExecutions();
         }
     }

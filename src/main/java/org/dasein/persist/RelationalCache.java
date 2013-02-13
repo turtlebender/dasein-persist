@@ -24,7 +24,6 @@ import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.log4j.Logger;
-import org.dasein.util.DaseinUtilProperties;
 import org.dasein.util.Jiterator;
 import org.dasein.persist.jdbc.Counter;
 import org.dasein.persist.jdbc.Creator;
@@ -38,7 +37,7 @@ import org.dasein.util.CachedItem;
 import org.dasein.util.CacheManagementException;
 import org.dasein.util.JitCollection;
 import org.dasein.util.JiteratorFilter;
-import org.dasein.util.tasks.DaseinUtilTasks;
+import org.dasein.util.DaseinUtilTasks;
 
 public final class RelationalCache<T extends CachedItem> extends PersistentCache<T> {
     static public final Logger logger = Logger.getLogger(RelationalCache.class);
@@ -494,38 +493,7 @@ public final class RelationalCache<T extends CachedItem> extends PersistentCache
                 
                 results = xaction.execute(loader, params, readDataSource);
                 xaction.commit();
-
-                if (DaseinUtilProperties.isTaskSystemEnabled()) {
-                    DaseinUtilTasks.submit(new RelationalCacheTask(it, results));
-                    return new JitCollection<T>(it, getEntityClassName());
-                }
-                Thread t = new Thread() {
-                    public void run() {
-                        try {
-                            for( Map<String,Object> map: (Collection<Map<String,Object>>)results.get(Loader.LISTING) ) {
-                                for( String fieldName : map.keySet() ) {
-                                    LookupDelegate delegate = getLookupDelegate(fieldName);
-                                    
-                                    if( delegate != null && !delegate.validate((String)map.get(fieldName)) ) {
-                                        throw new PersistenceException("Unable to validate " + fieldName + " value of " + map.get(fieldName));
-                                    }
-                                }
-                                it.push(getCache().find(map));
-                            }
-                            it.complete();
-                        }
-                        catch( Exception e ) {
-                            it.setLoadException(e);
-                        }
-                        catch( Throwable t ) {
-                            it.setLoadException(new RuntimeException(t));
-                        }
-                    }
-                };
-                
-                t.setDaemon(true);
-                t.setName("Loader");
-                t.start();
+                DaseinUtilTasks.submit(new RelationalCacheTask(it, results));
                 return new JitCollection<T>(it, getEntityClassName());
             }
             catch( PersistenceException e ) {
