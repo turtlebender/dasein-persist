@@ -28,7 +28,6 @@ import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Currency;
@@ -328,7 +327,7 @@ public abstract class PersistentCache<T extends CachedItem> {
         else {
             secondaryKeys = new Key[0];
         }
-        cache = new ConcurrentMultiCache<T>(cls, primaryKey.getFields()[0]);
+        cache = this.createCache(cls, primaryKey);
         init(cls, keys);
         Class<?> current = cls;
         
@@ -367,6 +366,10 @@ public abstract class PersistentCache<T extends CachedItem> {
 
     protected ConcurrentMultiCache<T> getCache() {
         return cache;
+    }
+
+    protected ConcurrentMultiCache<T> createCache(Class<T> cls, Key primary) {
+        return new ConcurrentMultiCache<T>(cls, primary.getFields()[0]);
     }
 
     public abstract T create(Transaction xaction, Map<String,Object> state) throws PersistenceException;
