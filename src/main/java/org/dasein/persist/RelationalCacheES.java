@@ -43,7 +43,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * A Relational Cache backed by Ehcache
+ * A Relational Cache backed by ConcurrentMultiEhcache
  * @param <T>
  */
 public final class RelationalCacheES<T extends CachedItem> extends PersistentCache<T> {
@@ -115,9 +115,9 @@ public final class RelationalCacheES<T extends CachedItem> extends PersistentCac
             public void init() {
                 setTarget(self.getEntityClassName());
                 switch (translationMethod) {
-                case CUSTOM: setCustomTranslating(); break;
-                case STANDARD: setTranslating(true); break;
-                case NONE: setTranslating(false); break;
+                    case CUSTOM: setCustomTranslating(); break;
+                    case STANDARD: setTranslating(true); break;
+                    case NONE: setTranslating(false); break;
                 }
             }
 
@@ -147,9 +147,9 @@ public final class RelationalCacheES<T extends CachedItem> extends PersistentCac
                     setCriteria(self.getPrimaryKey().getFields());
                 }
                 switch (translationMethod) {
-                case CUSTOM: setCustomTranslating(); break;
-                case STANDARD: setTranslating(true); break;
-                case NONE: setTranslating(false); break;
+                    case CUSTOM: setCustomTranslating(); break;
+                    case STANDARD: setTranslating(true); break;
+                    case NONE: setTranslating(false); break;
                 }
 
             }
@@ -188,9 +188,9 @@ public final class RelationalCacheES<T extends CachedItem> extends PersistentCac
                     setOrder(desc, cols.toArray(new String[cols.size()]));
                 }
                 switch (translationMethod) {
-                case CUSTOM: setCustomTranslating(); break;
-                case STANDARD: setTranslating(true); break;
-                case NONE: setTranslating(false); break;
+                    case CUSTOM: setCustomTranslating(); break;
+                    case STANDARD: setTranslating(true); break;
+                    case NONE: setTranslating(false); break;
                 }
             }
 
@@ -313,21 +313,20 @@ public final class RelationalCacheES<T extends CachedItem> extends PersistentCac
     public T get(final Object primaryKeyValue) throws PersistenceException {
         CacheLoader<T> loader = new CacheLoader<T>() {
             public T load(Object ... args) {
-                String uuid = UUID.randomUUID().toString();
                 try {
-                SearchTerm[] terms = new SearchTerm[1];
-                Collection<T> list;
+                    SearchTerm[] terms = new SearchTerm[1];
+                    Collection<T> list;
 
-                terms[0] = new SearchTerm((String)args[0], Operator.EQUALS, args[1]);
-                try {
-                    list = RelationalCacheES.this.load(getLoader(terms, null), null, toParams(terms));
-                } catch( PersistenceException e ) {
-                    throw new RuntimeException(e);
-                }
-                if( list.isEmpty() ) {
-                    return null;
-                }
-                return list.iterator().next();
+                    terms[0] = new SearchTerm((String)args[0], Operator.EQUALS, args[1]);
+                    try {
+                        list = RelationalCacheES.this.load(getLoader(terms, null), null, toParams(terms));
+                    } catch( PersistenceException e ) {
+                        throw new RuntimeException(e);
+                    }
+                    if( list.isEmpty() ) {
+                        return null;
+                    }
+                    return list.iterator().next();
                 } catch (Throwable t) {
                     throw new RuntimeException(t);
                 }
@@ -413,21 +412,6 @@ public final class RelationalCacheES<T extends CachedItem> extends PersistentCac
         return params;
     }
 
-    private class RelationalCacheTask implements Runnable {
-        private final Jiterator<T> it;
-        private final Map<String,Object> results;
-
-        private RelationalCacheTask(Jiterator<T> it, Map<String,Object> results) {
-            this.it = it;
-            this.results = results;
-        }
-
-        @Override
-        public void run() {
-
-        }
-    }
-
     @SuppressWarnings("unchecked")
     private Collection<T> load(Loader loader, JiteratorFilter<T> filter, Map<String,Object> params) throws PersistenceException {
         Transaction xaction = Transaction.getInstance(true);
@@ -494,6 +478,13 @@ public final class RelationalCacheES<T extends CachedItem> extends PersistentCac
         getCache().release(item);
     }
 
+    /**
+     * Removes the specified item from the system permanently.
+     * Warning: this method is not safe to use without manual cache reasoning/adjustment.
+     * @param xaction the transaction under which this event is occurring
+     * @param terms the criteria to use for removal
+     * @throws PersistenceException
+     */
     @Override
     public void remove(Transaction xaction, SearchTerm ... terms) throws PersistenceException {
         xaction.execute(getDeleter(terms), toParams(terms), writeDataSource);
@@ -516,5 +507,8 @@ public final class RelationalCacheES<T extends CachedItem> extends PersistentCac
     public void update(Transaction xaction, T item, Map<String,Object> state) throws PersistenceException {     
         state.put("--key--", getPrimaryKey().getFields()[0]);
         xaction.execute(getUpdater(), state, writeDataSource);
+        // important to update the cache to maintain read-after-update consistency because of
+        // the way ConcurrentMultiEhcache loading locks are implemented
+        getCache().cache(item);
     }    
 }

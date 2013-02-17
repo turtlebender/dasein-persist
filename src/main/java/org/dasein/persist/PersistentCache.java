@@ -368,6 +368,7 @@ public abstract class PersistentCache<T extends CachedItem> {
         return cache;
     }
 
+    // Allows subclasses to choose their ConcurrentMultiCache implementation.
     protected ConcurrentMultiCache<T> createCache(Class<T> cls, Key primary) {
         return new ConcurrentMultiCache<T>(cls, primary.getFields()[0]);
     }
