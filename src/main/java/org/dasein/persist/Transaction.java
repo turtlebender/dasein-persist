@@ -147,9 +147,6 @@ public class Transaction {
                 } else if (diff > warnMs) {
                     logger.warn("Transaction " + xaction.transactionId + " has been open for " + diff/1000L + " seconds.");
                 }
-                if( diff  > 600 ) {
-                    closing.add(xaction);
-                }
             }
         }
     }
