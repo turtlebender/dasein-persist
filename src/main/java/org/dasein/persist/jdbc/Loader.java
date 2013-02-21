@@ -20,7 +20,6 @@
 /* Copyright (c) 2006 Valtira Corporation, All Rights Reserved */
 package org.dasein.persist.jdbc;
 
-import java.awt.*;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
@@ -182,7 +181,7 @@ public class Loader extends AutomatedSql {
         map.put(LISTING, list);
         prepare(params);
         ResultSet results = statement.executeQuery();
-        long queryStartTimestamp = System.currentTimeMillis();
+        long queryStopTimestamp = System.currentTimeMillis();
 
         try {
             while( results.next() ) {
@@ -198,16 +197,18 @@ public class Loader extends AutomatedSql {
         }
         finally {
             try { results.close(); }
-            catch( SQLException e ) { }
+            catch( SQLException e ) {
+                logger.error("Problem closing results: " + e.getMessage(), e);
+            }
         }
 
         long endTimestamp = System.currentTimeMillis();
 
         if( (endTimestamp - startTimestamp) > (2000L) ) {
-            String totalTime = Long.toString((endTimestamp - startTimestamp));
-            String totalQueryTime = Long.toString((endTimestamp - queryStartTimestamp));
+            String queryTime = Long.toString((queryStopTimestamp - startTimestamp));
+            String totalRsTime = Long.toString((endTimestamp - queryStopTimestamp));
 
-            String debugTiming = "[total: "+ totalTime + ",query: " + totalQueryTime+"]";
+            String debugTiming = "[query: "+ queryTime + ",rs: " + totalRsTime+"]";
 
             logger.warn("SLOW QUERY: " + sql + " "+ debugTiming);
         }

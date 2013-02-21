@@ -27,7 +27,6 @@ import java.lang.management.MemoryMXBean;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
 import java.util.Date;
 import java.util.EmptyStackException;
 import java.util.HashMap;
@@ -45,6 +44,7 @@ import javax.sql.DataSource;
 
 // Apache imports
 import org.apache.log4j.Logger;
+import org.dasein.util.DaseinUtilTasks;
 
 /**
  * Represents a database transaction to applications managing their
@@ -65,6 +65,10 @@ public class Transaction {
      */
     static private final AtomicInteger connections = new AtomicInteger(0);
     /**
+     * The most transactions ever open at a single time.
+     */
+    static private final AtomicInteger highPoint = new AtomicInteger(0);
+    /**
      * The next transaction ID to use.
      */
     static private final AtomicInteger nextTransactionId = new AtomicInteger(0);
@@ -76,125 +80,80 @@ public class Transaction {
      * Cache of Execution objects to minimize dynamically created SQL
      */
     static private final Map<String,Stack<Execution>> eventCache = new ConcurrentHashMap<String, Stack<Execution>>(8, 0.9f, 1);
+    /**
+     * Cache of DataSource instances. JNDI blocks on System properties.
+     */
+    static private final Map<String,DataSource> dsCache = new ConcurrentHashMap<String, DataSource>(8, 0.9f, 1);
 
     static private final AtomicBoolean maidLaunched = new AtomicBoolean(false);
+
     static private final Properties properties = new Properties();
 
-    static public final String ALTMAID_ENABLED = "dasein.persist.altmaid.enabled";
-    static public final String ALTMAID_FREQUENCY = "dasein.persist.altmaid.frequency";
-    static public final String ALTMAID_MAXSECONDS = "dasein.persist.altmaid.maxseconds";
-    static public final String ALTMAID_WARNSECONDS = "dasein.persist.altmaid.warnseconds";
+    static public final String MAID_DISABLED = "dasein.persist.maid.disabled";
+    static public final String MAID_FREQUENCY = "dasein.persist.maid.frequency";
+    static public final String MAID_MAXSECONDS = "dasein.persist.maid.maxseconds";
+    static public final String MAID_WARNSECONDS = "dasein.persist.maid.warnseconds";
 
     static private final boolean tracking;
     static {
         loadProperties();
-        if (isAltMaid()) {
-            tracking = isAltMaidEnabled();
-        } else {
-            tracking = true;
-        }
+        tracking = !isMaidDisabled();
     }
 
     /**
-     * Cleans up transactions that somehow never got cleaned up.
+     * Clean up transactions.
      */
-    static private void clean() {
-        while( true ) {
-            ArrayList<Transaction> closing;
-            int count;
-            
-            if( logger.isInfoEnabled() ) {
-                logger.info("There are " + connections.get() + " open connections right now");
+    private static class TransactionMaid implements Runnable {
+        @Override
+        public void run() {
+            int cycleCount = 0;
+            long warn = getMaidWarnMs();
+            long max = getMaidMaxMs();
+            long freq = getMaidFrequencyMs();
+            while (true) {
+                if (cycleCount % 21 == 20) {
+                    loadProperties();
+                    warn = getMaidWarnMs();
+                    max = getMaidMaxMs();
+                    freq = getMaidFrequencyMs();
+                }
+                try {
+                    Thread.sleep(freq);
+                    _clean(warn, max);
+                } catch (Throwable t) {
+                    logger.error("Problem running transaction maid: " + t.getMessage(), t);
+                } finally {
+                    cycleCount += 1;
+                }
             }
-            try { Thread.sleep(1000L); }
-            catch( InterruptedException ignore ) { /* ignore me */ }
-            count = transactions.size();
-            if( count < 1 ) {
-                continue;
-            }
-            if( logger.isInfoEnabled() ) {
-                logger.info("Running the maid service on " + count + " transactions.");
-            }
-            closing = new ArrayList<Transaction>();
-            long now = System.currentTimeMillis();
+        }
 
+        private static void _clean(long warnMs, long maxMs) {
+            if (transactions.isEmpty()) {
+                return;
+            }
+            final long now = System.currentTimeMillis();
             // ConcurrentHashMap provides a weakly-consistent view for this iterator
-            for( Transaction xaction : transactions.values() ) {
-                long diff = (now - xaction.openTime)/1000L;
-
-                if( diff > 10 ) {
-                    Thread t = xaction.executionThread;
-
-                    logger.warn("Open transaction " + xaction.transactionId + " has been open for " + diff + " seconds.");
-                    logger.warn("Transaction " + xaction.transactionId + " state: " + xaction.state);
-                    if( t== null ) {
-                        logger.warn("Thread: no execution thread active");
+            for (Transaction xaction : transactions.values()) {
+                final long diff = now - xaction.openTime;
+                if (diff > maxMs) {
+                    logger.error("Transaction " + xaction.transactionId + " has been open for " + diff/1000L + " seconds, forcing a close: " + xaction.state);
+                    try {
+                        xaction.rollback(true);
+                        xaction.close();
+                    } catch (Throwable t) {
+                        logger.error("Problem rolling back offending transaction " + xaction.transactionId + ": " + t.getMessage());
                     }
-                    else {
-                        logger.warn("Thread " + t.getName() + " (" + t.getState() + "):");
-                        for( StackTraceElement elem : t.getStackTrace() ) {
-                            logger.warn("\t" + elem.toString());
-                        }
-                    }
+                } else if (diff > warnMs) {
+                    logger.warn("Transaction " + xaction.transactionId + " has been open for " + diff/1000L + " seconds.");
                 }
                 if( diff  > 600 ) {
                     closing.add(xaction);
                 }
             }
-            for( Transaction xaction: closing ) {
-                logger.warn("Encountered a stale transaction (" + xaction.transactionId + "), forcing a close: " + xaction.state);
-                xaction.logStackTrace();
-                xaction.close();
-            }
         }
     }
 
-    /**
-     * Alternate way to clean up transactions.
-     */
-    static private void altClean() {
-        int cycleCount = 0;
-        long warn = getAltMaidWarnMs();
-        long max = getAltMaidMaxMs();
-        long freq = getAltMaidFrequencyMs();
-        while (true) {
-            if (cycleCount % 21 == 20) {
-                warn = getAltMaidWarnMs();
-                max = getAltMaidMaxMs();
-                freq = getAltMaidFrequencyMs();
-            }
-            try {
-                Thread.sleep(freq);
-                _altClean(warn, max);
-            } catch (Throwable t) {
-                logger.error("Problem running altmaid: " + t.getMessage(), t);
-            } finally {
-                cycleCount += 1;
-            }
-        }
-    }
-    static private void _altClean(long warnMs, long maxMs) {
-        if (transactions.isEmpty()) {
-            return;
-        }
-        final long now = System.currentTimeMillis();
-        // ConcurrentHashMap provides a weakly-consistent view for this iterator
-        for (Transaction xaction : transactions.values()) {
-            final long diff = now - xaction.openTime;
-            if (diff > maxMs) {
-                logger.error("Transaction " + xaction.transactionId + " has been open for " + diff/1000L + " seconds, forcing a close: " + xaction.state);
-                try {
-                    xaction.rollback(true);
-                    xaction.close();
-                } catch (Throwable t) {
-                    logger.error("Problem rolling back offending transaction " + xaction.transactionId + ": " + t.getMessage());
-                }
-            } else if (diff > warnMs) {
-                logger.warn("Transaction " + xaction.transactionId + " has been open for " + diff/1000L + " seconds.");
-            }
-        }
-    }
-    
     /**
      * Provides a new transaction instance to manage your transaction
      * context.
@@ -205,39 +164,15 @@ public class Transaction {
     }
     
     static public Transaction getInstance(boolean readOnly) {        
-        Transaction xaction;
         final int xid = nextTransactionId.incrementAndGet();
-        if( xid == Integer.MAX_VALUE ) {
+        if( xid == Integer.MAX_VALUE ) { // contention here will cause a few screwy values
             nextTransactionId.set(0);
         }
-        xaction = new Transaction(xid, readOnly);
+        Transaction xaction = new Transaction(xid, readOnly);
         if (maidLaunched.compareAndSet(false, true)) {
-            final Thread maid;
             loadProperties();
-            if (isAltMaid()) {
-                if (isAltMaidEnabled()) {
-                    maid = new Thread() {
-                        public void run() {
-                            altClean();
-                        }
-                    };
-                    maid.setName("Transaction Alt-Maid");
-                } else {
-                    maid = null;
-                    logger.warn("Transaction maid disabled");
-                }
-            } else {
-                maid = new Thread() {
-                    public void run() {
-                        clean();
-                    }
-                };
-                maid.setName("Transaction Maid");
-            }
-            if (maid != null) {
-                maid.setDaemon(true);
-                maid.setPriority(Thread.MIN_PRIORITY + 1);
-                maid.start();
+            if (!isMaidDisabled()) {
+                DaseinUtilTasks.submit(new TransactionMaid());
             }
         }
         return xaction;
@@ -245,7 +180,6 @@ public class Transaction {
 
     static public void report() {
         MemoryMXBean bean = ManagementFactory.getMemoryMXBean();
-
         StringBuilder sb = new StringBuilder();
         sb.append("Dasein Connection Report (" + new Date() + "): ");
         if (tracking) {
@@ -270,7 +204,6 @@ public class Transaction {
      */
     private volatile boolean dirty = false;
     
-    private volatile Thread executionThread = null;
     /**
      * A stack of events that are part of this transaction.
      */
@@ -403,7 +336,6 @@ public class Transaction {
             StringBuilder holder = new StringBuilder();
             boolean success = false;
             
-            executionThread = Thread.currentThread();
             state = "PREPARING";
             try {
                 Execution event = getEvent(cls);
@@ -475,7 +407,6 @@ public class Transaction {
                     logger.warn("FAILED TRANSACTION (" + transactionId + "): " + holder.toString());
                     rollback();
                 }
-                executionThread = null;
             }
         }
         finally {
@@ -487,7 +418,6 @@ public class Transaction {
             StringBuilder holder = new StringBuilder();
             boolean success = false;
             
-            executionThread = Thread.currentThread();
             state = "PREPARING";
             try {
                 Map<String,Object> res;
@@ -532,7 +462,6 @@ public class Transaction {
                     logger.warn("FAILED TRANSACTION (" + transactionId + "): " + holder.toString());
                     rollback();
                 }
-                executionThread = null;
             }
         }
         finally {
@@ -630,8 +559,20 @@ public class Transaction {
                 if( dsn == null ) {
                     dsn = event.getDataSource();
                 }
+                if (dsn == null) {
+                    throw new PersistenceException("No data source name");
+                }
                 state = "LOOKING UP";
-                ds = (DataSource)ctx.lookup(dsn);
+                ds = dsCache.get(dsn);
+                if (ds == null) {
+                    ds = (DataSource)ctx.lookup(dsn);
+                    if (ds != null) {
+                        dsCache.put(dsn, ds);
+                    }
+                }
+                if (ds == null) {
+                    throw new PersistenceException("Could not find data source: " + dsn);
+                }
                 conn = ds.getConnection();
                 openTime = System.currentTimeMillis();
                 if( logger.isDebugEnabled() ) {
@@ -667,7 +608,7 @@ public class Transaction {
         }
         return log + '\'';
     }
-    
+
     private String elementToString(StackTraceElement element) {
         int no = element.getLineNumber();
         String ln;
@@ -711,7 +652,6 @@ public class Transaction {
     }
 
     protected void rollback(boolean cancelStatements) {
-
         try {
             if( connection == null ) {
                 return;
@@ -748,7 +688,9 @@ public class Transaction {
             }
             try {
                 connection.close();
-                logger.warn(connectionCloseLog());
+                if (logger.isDebugEnabled()) {
+                    logger.debug(connectionCloseLog());
+                }
             }
             catch( SQLException e )
             {
@@ -782,12 +724,9 @@ public class Transaction {
         }
     }
 
-    static boolean isAltMaid() {
-        return properties.containsKey(ALTMAID_ENABLED);
-    }
 
-    static boolean isAltMaidEnabled() {
-        return isAltMaid() && properties.getProperty(ALTMAID_ENABLED).equalsIgnoreCase("true");
+    static boolean isMaidDisabled() {
+        return properties.containsKey(MAID_DISABLED) && properties.getProperty(MAID_DISABLED).equalsIgnoreCase("true");
     }
 
     static private long getMsFromSecondsProperty(String propKey, int defaultSeconds) {
@@ -803,15 +742,15 @@ public class Transaction {
         return (long)defaultSeconds * 1000L;
     }
 
-    static long getAltMaidFrequencyMs() {
-        return getMsFromSecondsProperty(ALTMAID_FREQUENCY, 5);
+    static long getMaidFrequencyMs() {
+        return getMsFromSecondsProperty(MAID_FREQUENCY, 5);
     }
 
-    static long getAltMaidWarnMs() {
-        return getMsFromSecondsProperty(ALTMAID_WARNSECONDS, 10);
+    static long getMaidWarnMs() {
+        return getMsFromSecondsProperty(MAID_WARNSECONDS, 10);
     }
 
-    static long getAltMaidMaxMs() {
-        return getMsFromSecondsProperty(ALTMAID_MAXSECONDS, 60);
+    static long getMaidMaxMs() {
+        return getMsFromSecondsProperty(MAID_MAXSECONDS, 60);
     }
 }

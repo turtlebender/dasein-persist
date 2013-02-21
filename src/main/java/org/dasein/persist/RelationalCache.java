@@ -24,7 +24,6 @@ import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.log4j.Logger;
-import org.dasein.util.Jiterator;
 import org.dasein.persist.jdbc.Counter;
 import org.dasein.persist.jdbc.Creator;
 import org.dasein.persist.jdbc.Deleter;
@@ -35,7 +34,9 @@ import org.dasein.persist.jdbc.AutomatedSql.TranslationMethod;
 import org.dasein.util.CacheLoader;
 import org.dasein.util.CachedItem;
 import org.dasein.util.CacheManagementException;
+import org.dasein.util.DaseinUtilTasks;
 import org.dasein.util.JitCollection;
+import org.dasein.util.Jiterator;
 import org.dasein.util.JiteratorFilter;
 import org.dasein.util.DaseinUtilTasks;
 
@@ -493,6 +494,7 @@ public final class RelationalCache<T extends CachedItem> extends PersistentCache
                 
                 results = xaction.execute(loader, params, readDataSource);
                 xaction.commit();
+
                 DaseinUtilTasks.submit(new RelationalCacheTask(it, results));
                 return new JitCollection<T>(it, getEntityClassName());
             }
