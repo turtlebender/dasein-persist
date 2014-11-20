@@ -37,14 +37,13 @@ import java.util.Stack;
 // J2EE imports
 import javax.naming.NamingException;
 
-// Apache imports
-import org.apache.log4j.Logger;
 
-import org.dasein.persist.dao.LoadTranslator;
 import org.dasein.persist.dao.RemoveTranslator;
 import org.dasein.persist.dao.SaveTranslator;
 import org.dasein.util.DaseinUtilTasks;
 import org.dasein.util.Translator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Represents a database event, generally a specific query or update.
@@ -59,7 +58,7 @@ public abstract class Execution {
     static public final String DASEIN_PERSIST_PROPERTIES = "daseinPersist";
     static public final String PROPERTIES = "/dasein-persistence.properties";
     
-    static private final Logger logger = Logger.getLogger(Execution.class);
+    static private final Logger logger = LoggerFactory.getLogger(Execution.class);
 
     /**
      * Cache of execution instances.
@@ -155,7 +154,7 @@ public abstract class Execution {
      */
     @SuppressWarnings("unchecked")
     static public <T extends Execution> T getInstance(Class<T> cls) {
-        logger.debug("enter - getInstance()");
+        logger.debug("enter - getTransaction()");
         try {
             Stack<Execution> stack;
             
@@ -183,7 +182,7 @@ public abstract class Execution {
             throw new RuntimeException(e.getMessage());
         }
         finally {
-            logger.debug("exit - getInstance()");
+            logger.debug("exit - getTransaction()");
         }
     }
 
@@ -453,23 +452,7 @@ public abstract class Execution {
         dbms = dbms.toLowerCase();
         return dbms.startsWith("hsql");
     }
-    
-    @SuppressWarnings("unchecked")
-    public Map<String,Translator<String>> loadStringTranslations(Transaction xaction, Class cls, String id) throws PersistenceException, SQLException {
-        Map<String,Object> criteria = new HashMap<String,Object>();
-        Map<String,Translator<String>> map = new HashMap<String,Translator<String>>();
-        
-        criteria.put("ownerClass", cls);
-        criteria.put("ownerId", id);
-        criteria = xaction.execute(LoadTranslator.class, criteria, Execution.getDataSourceName(cls.getName()));
-        // a retarded side-effect of the lame-ass implementation of generics in Java
-        for( String attr : criteria.keySet() ) {
-            Object trans = criteria.get(attr);
-            
-            map.put(attr, (Translator<String>)trans);
-        }
-        return map;
-    }
+
     
     public void removeStringTranslations(Transaction xaction, Class cls, String id) throws PersistenceException, SQLException {
         Map<String,Object> state = new HashMap<String,Object>();

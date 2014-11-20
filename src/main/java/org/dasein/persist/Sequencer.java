@@ -21,14 +21,15 @@
 package org.dasein.persist;
 
 // J2SE imports
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.InputStream;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 
-// Apache imports
-import org.apache.log4j.Logger;
 
 /**
  * <p>
@@ -50,7 +51,7 @@ import org.apache.log4j.Logger;
  * </p>
  * <p>
  * <code>
- * Sequencer seq = Sequencer.getInstance(this.class);<br/> 
+ * Sequencer seq = Sequencer.getTransaction(this.class);<br/>
  * id = seq.next();
  * </code>
  * </p>
@@ -63,7 +64,7 @@ import org.apache.log4j.Logger;
 public abstract class Sequencer {
     static public final String PROPERTIES = "/dasein-persistence.properties";
     
-    static private final Logger logger = Logger.getLogger(Sequencer.class);
+    static private final Logger logger = LoggerFactory.getLogger(Sequencer.class);
 
     /**
      * Class for the default sequencer, set to{@link DaseinSequencer}.class
@@ -137,7 +138,7 @@ public abstract class Sequencer {
      * @return the sequencer with the specified name
      */
     static public final Sequencer getInstance(String name) {
-        logger.debug("enter - getInstance()");
+        logger.debug("enter - getTransaction()");
         try {
             Sequencer seq = null;
             
@@ -167,7 +168,7 @@ public abstract class Sequencer {
             }
         }
         finally {
-            logger.debug("exit - getInstance()");
+            logger.debug("exit - getTransaction()");
         }
     }
 

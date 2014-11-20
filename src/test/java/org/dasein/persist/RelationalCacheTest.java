@@ -18,13 +18,73 @@
 
 package org.dasein.persist;
 
-import junit.framework.TestCase;
 
+import org.apache.commons.dbcp.BasicDataSource;
+import org.apache.log4j.BasicConfigurator;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
-public class RelationalCacheTest extends TestCase {
+import javax.sql.DataSource;
+import java.sql.*;
+import java.util.HashMap;
+import java.util.Map;
+import static org.junit.Assert.*;
+
+public class RelationalCacheTest {
+    String connectURI = "jdbc:derby:memory:testDB";
+    DataSource source;
+
+    public RelationalCacheTest(){
+        BasicConfigurator.configure();
+    }
+
+    @After
+    public void tearDown() throws Exception{
+        Statement stmt = source.getConnection().createStatement();
+        stmt.executeUpdate("drop table \"persistent_object\"");
+    }
+
+    @Before
+    public void setup() throws Exception{
+        BasicDataSource ds = new BasicDataSource();
+        ds.setDriverClassName("org.apache.derby.jdbc.EmbeddedDriver");
+        ds.setUrl(connectURI + ";create=true");
+        Connection conn = ds.getConnection();
+        Statement stmt = conn.createStatement();
+        stmt.executeUpdate("create table \"persistent_object\"(" +
+                "\"amount\" float, \"currency\" blob, \"key_field\" bigint, \"name\" varchar(40), " +
+                "\"description\" varchar(255), PRIMARY KEY (\"key_field\"))");
+        stmt.close();
+        conn.close();
+        source = ds;
+    }
+
     @Test
-    public void testNothing() { }
+    public void simpleCreate() throws Exception{
+        DaseinPersist factory = new DaseinPersist(source);
+        PersistentCache<PersistentObject> cache = factory.getCache(PersistentObject.class, "keyField");
+        Map<String,Object> state = new HashMap<String,Object>();
+        long id = 1L;
+        String name = "Get Name";
+        String description = "Get Description";
+
+        state.put("keyField", id);
+        state.put("name", name);
+        state.put("description", description);
+        Transaction xaction = factory.getTransaction(false);
+        try {
+            PersistentObject item = cache.create(xaction, state);
+            xaction.commit();
+            assertNotNull("No object was created", item);
+            assertEquals("ID does not match", id, item.getKeyField());
+            assertEquals("Name does not match", name, item.getName());
+            assertEquals("Description does not match", description, item.getDescription());
+        }
+        finally {
+            xaction.rollback();
+        }
+    }
     /*
     private PersistentCache<PersistentObject> cache  = null;
     private MysqlConnectionPoolDataSource     testDs = null;
@@ -76,7 +136,7 @@ public class RelationalCacheTest extends TestCase {
             state.put("name", name);
             state.put("description", description);
             
-            Transaction xaction = Transaction.getInstance();
+            Transaction xaction = Transaction.getTransaction();
             
             try {
                 PersistentObject item = cache.create(xaction, state);
@@ -99,7 +159,7 @@ public class RelationalCacheTest extends TestCase {
         if( cache != null ) {
             try {
                 for( PersistentObject item : cache.list() ) {
-                    Transaction xaction = Transaction.getInstance();
+                    Transaction xaction = Transaction.getTransaction();
                     
                     try {
                         cache.remove(xaction, item);
@@ -181,7 +241,7 @@ public class RelationalCacheTest extends TestCase {
         state.put("name", name);
         state.put("description", description);
         
-        Transaction xaction = Transaction.getInstance();
+        Transaction xaction = Transaction.getTransaction();
         
         try {
             PersistentObject item = cache.create(xaction, state);
@@ -243,7 +303,7 @@ public class RelationalCacheTest extends TestCase {
         PersistentObject item = cache.get(1L);
         
         assertNotNull("No object exists, unable to test remove", item);
-        Transaction xaction = Transaction.getInstance();
+        Transaction xaction = Transaction.getTransaction();
         
         try {
             cache.remove(xaction, item);
@@ -261,7 +321,7 @@ public class RelationalCacheTest extends TestCase {
         PersistentObject item = cache.get(1L);
         
         assertNotNull("No object exists, unable to test update", item);
-        Transaction xaction = Transaction.getInstance();
+        Transaction xaction = Transaction.getTransaction();
         
         try {
             HashMap<String,Object> state = new HashMap<String,Object>();

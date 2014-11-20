@@ -20,8 +20,6 @@
 /* Copyright (c) 2006 Valtira Corporation, All Rights Reserved */
 package org.dasein.persist.jdbc;
 
-import java.io.StringBufferInputStream;
-import java.io.StringReader;
 import java.io.StringWriter;
 import java.lang.reflect.*;
 import java.sql.SQLException;
@@ -35,19 +33,16 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
-import org.apache.log4j.Logger;
 
 import org.dasein.persist.Execution;
-import org.dasein.persist.PersistenceException;
-import org.dasein.persist.PersistentFactory;
-import org.dasein.persist.Transaction;
 import org.dasein.persist.PersistentCache.EntityJoin;
-import org.dasein.persist.l10n.LocalizationGroup;
 import org.dasein.util.CachedItem;
 import org.dasein.util.Translator;
 import org.dasein.util.uom.Measured;
 import org.json.JSONArray;
 import org.json.JSONException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class AutomatedSql extends Execution {
     static public enum Operator {
@@ -97,7 +92,7 @@ public class AutomatedSql extends Execution {
 
     static public enum TranslationMethod { NONE, STANDARD, CUSTOM };
 
-    static private final Logger logger = Logger.getLogger(AutomatedSql.class);
+    static private final Logger logger = LoggerFactory.getLogger(AutomatedSql.class);
 
     private ArrayList<String>        columns           = new ArrayList<String>();
     private ArrayList<Criterion>     criteria          = new ArrayList<Criterion>();
@@ -399,14 +394,6 @@ public class AutomatedSql extends Execution {
                     statement.setString(i, ((Enum)ob).name());
                 }
             }
-            else if( t.equals(LocalizationGroup.class) ) {
-                if( ob == null ) {
-                    statement.setNull(i, Types.VARCHAR);
-                }
-                else {
-                    statement.setString(i, ((LocalizationGroup)ob).getLocalizationCode());
-                }
-            }
             else if( t.getName().startsWith("java.") ) {
                 if(ob == null) {
                     statement.setNull(i, Types.BLOB);
@@ -571,105 +558,17 @@ public class AutomatedSql extends Execution {
         target = cls;
         table = tname;
         parseFields(cls, columns, types, ptypes, translators);
-
     }
 
     protected void setTranslating(boolean t) {
         translationMethod = (t ? TranslationMethod.STANDARD : TranslationMethod.NONE);
     }
 
-    protected void setTranslating(PersistentFactory<?> f) {
-        translationMethod = TranslationMethod.CUSTOM;
-    }
-
-    public Map<String,Translator<String>> loadStringTranslations(Transaction xaction, Class cls, String id) throws PersistenceException, SQLException {
-        if( translators.size() > 0 ) {
-            if( translationMethod.equals(TranslationMethod.STANDARD) ) {
-                return super.loadStringTranslations(xaction, cls, id);
-            }
-            else if( translationMethod.equals(TranslationMethod.CUSTOM) ) {
-                return loadCustomTranslations(xaction, id);
-            }
-        }
-        return new HashMap<String,Translator<String>>();
-    }
-
     private transient Class<? extends Execution> xloader = null;
-
-    @SuppressWarnings("unchecked")
-    private Map<String,Translator<String>> loadCustomTranslations(Transaction xaction, String id) throws PersistenceException, SQLException {
-        logger.debug("enter - loadTranslations(Transaction,String)");
-        try {
-            Map<String,Object> criteria = new HashMap<String,Object>();
-            Map<String,Translator<String>> map = new HashMap<String,Translator<String>>();
-            Class<?> cls = getTarget();
-
-            criteria.put("ownerId", id);
-            if( xloader == null ) {
-                xloader = PersistentFactory.compileTranslator(cls, "Loader");
-            }
-            criteria = xaction.execute(xloader, criteria, Execution.getDataSourceName(cls.getName()));
-            // a retarded side-effect of the lame-ass implementation of generics in Java
-            for( String attr : criteria.keySet() ) {
-                Object trans = criteria.get(attr);
-
-                map.put(attr, (Translator<String>)trans);
-            }
-            return map;
-        }
-        finally {
-            logger.debug("exit - loadTranslations(Transaction,String)");
-        }
-    }
-
-    public void removeStringTranslations(Transaction xaction, Class cls, String id) throws PersistenceException, SQLException {
-        if( translationMethod.equals(TranslationMethod.STANDARD) ) {
-            super.removeStringTranslations(xaction, cls, id);
-        }
-        else if( translationMethod.equals(TranslationMethod.CUSTOM) ) {
-            removeCustomTranslations(xaction, id);
-        }
-    }
 
     private transient Class<? extends Execution> xdeleter = null;
 
-    private void removeCustomTranslations(Transaction xaction, String id) throws PersistenceException, SQLException {
-        Map<String,Object> state = new HashMap<String,Object>();
-        Class<?> cls = getTarget();
-
-        state.put("ownerId", id);
-        if( xdeleter == null ) {
-            xdeleter = PersistentFactory.compileTranslator(cls, "Deleter");
-        }
-        xaction.execute(xdeleter, state, Execution.getDataSourceName(cls.getName()));
-    }
-
-    public void saveStringTranslation(Transaction xaction, String cname, String id, String attr, Translator<String> t) throws SQLException, PersistenceException {
-        if( t == null ) {
-            return;
-        }
-        if( translationMethod.equals(TranslationMethod.STANDARD) ) {
-            super.saveStringTranslation(xaction, cname, id, attr, t);
-        }
-        else if( translationMethod.equals(TranslationMethod.CUSTOM) ) {
-            saveCustomTranslations(xaction, id, attr, t);
-        }
-    }
-
     private transient Class<? extends Execution> xupdater = null;
-
-    private void saveCustomTranslations(Transaction xaction, String id, String attr, Translator<String> t ) throws PersistenceException, SQLException {
-        Map<String,Object> state = new HashMap<String,Object>();
-        Class cls = getTarget();
-
-        state.put("ownerId", id);
-        state.put("attribute", attr);
-        state.put("translation", t);
-        if( xupdater == null ) {
-            xupdater = PersistentFactory.compileTranslator(cls, "Updater");
-        }
-        xaction.execute(xupdater, state, Execution.getDataSourceName(cls.getName()));
-    }
 
     protected void setEntityJoins(Map<Class<? extends CachedItem>,EntityJoin> joins) {
         entityJoins = joins;

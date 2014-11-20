@@ -21,13 +21,14 @@
 package org.dasein.persist;
 
 // J2SE imports
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.HashMap;
 import java.util.Map;
 
-// Apache imports
-import org.apache.log4j.Logger;
 
 /**
  * Provides state translation for persistent objects. By capturing
@@ -40,7 +41,7 @@ import org.apache.log4j.Logger;
  * @author George Reese (http://george.reese.name)
  */
 public class Memento<K> {
-    static private final Logger logger = Logger.getLogger(Memento.class);
+    static private final Logger logger = LoggerFactory.getLogger(Memento.class);
 
     /**
      * The persistent object whose state is being managed by this memento.

@@ -18,265 +18,32 @@
 
 package org.dasein.persist;
 
-import java.io.InputStream;
-import java.lang.annotation.Annotation;
-import java.lang.reflect.Array;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.lang.reflect.ParameterizedType;
-import java.math.BigDecimal;
-import java.math.BigInteger;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Currency;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
-import java.util.TimeZone;
-import java.util.TreeSet;
-import java.util.UUID;
-
-import org.apache.log4j.Logger;
 import org.dasein.persist.annotations.AutoJSON;
-import org.dasein.persist.annotations.Index;
-import org.dasein.persist.annotations.IndexType;
 import org.dasein.persist.annotations.Lookup;
-import org.dasein.persist.annotations.Schema;
-import org.dasein.util.CachedItem;
-import org.dasein.util.ConcurrentMultiCache;
-import org.dasein.util.CursorPopulator;
-import org.dasein.util.ForwardCursor;
-import org.dasein.util.JiteratorFilter;
+import org.dasein.util.*;
 import org.dasein.util.uom.Measured;
 import org.dasein.util.uom.UnitOfMeasure;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+import java.lang.annotation.Annotation;
+import java.lang.reflect.*;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.util.*;
 
 public abstract class PersistentCache<T extends CachedItem> {
-    static private final Logger logger = Logger.getLogger(PersistentCache.class);
+    static private final Logger logger = LoggerFactory.getLogger(PersistentCache.class);
 
     static public class EntityJoin {
         public Class<? extends CachedItem> joinEntity;
-        public String                      joinField;
-        public String                      localField;
-    }
-
-    static private final HashMap<String,PersistentCache<? extends CachedItem>> caches = new HashMap<String,PersistentCache<? extends CachedItem>>();
-
-    static public PersistentCache<? extends CachedItem> getCache(Class<? extends CachedItem> forClass) throws PersistenceException {
-        SchemaMapper[] mappers = null;
-        String schemaVersion = null;
-        String entityName = null;
-
-        for( Annotation annotation : forClass.getDeclaredAnnotations() ) {
-            if( annotation instanceof Schema ) {
-                schemaVersion = ((Schema)annotation).value();
-                entityName = ((Schema)annotation).entity();
-
-                Class<? extends SchemaMapper>[] mclasses = ((Schema)annotation).mappers();
-
-                if( mclasses != null && mclasses.length > 0 ) {
-                    mappers = new SchemaMapper[mclasses.length];
-                    for( int i=0; i<mclasses.length; i++ ) {
-                        try {
-                            mappers[i] = mclasses[i].newInstance();
-                        }
-                        catch( Throwable t ) {
-                            throw new PersistenceException(t.getMessage());
-                        }
-                    }
-                }
-            }
-        }
-        return getCacheWithSchema(forClass, entityName, schemaVersion == null ? "0" : schemaVersion, mappers);
-    }
-    
-    static public PersistentCache<? extends CachedItem> getCacheWithSchema(@Nonnull Class<? extends CachedItem> forClass, @Nullable String entityName, @Nonnull String schemaVersion, @Nullable SchemaMapper ... mappers) throws PersistenceException {
-        Class<?> cls = forClass;
-
-        while( !cls.getName().equals(Object.class.getName()) ) {
-            for( Field field : cls.getDeclaredFields() ) {
-                for( Annotation annotation : field.getDeclaredAnnotations() ) {
-                    if( annotation instanceof Index ) {
-                        Index idx = (Index)annotation;
-
-                        if( idx.type().equals(IndexType.PRIMARY) ) {
-                            return getCacheWithSchema(forClass, entityName, field.getName(), schemaVersion, mappers);
-                        }
-                    }
-                }
-            }
-            cls = cls.getSuperclass();
-        }
-        throw new PersistenceException("No primary key field identified for: " + forClass.getName());
-    }
-
-    static public PersistentCache<? extends CachedItem> getCache(Class<? extends CachedItem> forClass, String primaryKey) throws PersistenceException {
-        SchemaMapper[] mappers = null;
-        String schemaVersion = null;
-        String entityName = null;
-
-        for( Annotation annotation : forClass.getDeclaredAnnotations() ) {
-            if( annotation instanceof Schema ) {
-                schemaVersion = ((Schema)annotation).value();
-                entityName = ((Schema)annotation).entity();
-
-                Class<? extends SchemaMapper>[] mclasses = ((Schema)annotation).mappers();
-
-                if( mclasses != null && mclasses.length > 0 ) {
-                    mappers = new SchemaMapper[mclasses.length];
-                    for( int i=0; i<mclasses.length; i++ ) {
-                        try {
-                            mappers[i] = mclasses[i].newInstance();
-                        }
-                        catch( Throwable t ) {
-                            throw new PersistenceException(t.getMessage());
-                        }
-                    }
-                }
-            }
-        }
-        return getCacheWithSchema(forClass, entityName, primaryKey, schemaVersion == null ? "0" : schemaVersion, mappers);
-    }
-    
-    @SuppressWarnings("unchecked")
-    static public PersistentCache<? extends CachedItem> getCacheWithSchema(@Nonnull Class<? extends CachedItem> forClass, @Nullable String alternateEntytName, @Nonnull String primaryKey, @Nonnull String schemaVersion, @Nullable SchemaMapper ... mappers) throws PersistenceException {
-        PersistentCache<? extends CachedItem> cache = null;
-        String className = forClass.getName();
-
-        synchronized( caches ) {
-            cache = caches.get(className);
-            if( cache != null ) {
-                return cache;
-            }
-        }
-
-        Properties props = new Properties();
-
-        try {
-            InputStream is = DaseinSequencer.class.getResourceAsStream(DaseinSequencer.PROPERTIES);
-
-            if( is != null ) {
-                props.load(is);
-            }
-        }
-        catch( Exception e ) {
-            logger.error("Problem reading " + DaseinSequencer.PROPERTIES + ": " + e.getMessage(), e);
-        }
-        
-        TreeSet<Key> keys = new TreeSet<Key>();
-        Class<?> cls = forClass;
-
-        while( !cls.getName().equals(Object.class.getName()) ) {
-            for( Field field : cls.getDeclaredFields() ) {
-                for( Annotation annotation : field.getDeclaredAnnotations() ) {
-                    if( annotation instanceof Index ) {
-                        Index idx = (Index)annotation;
-                        
-                        if( idx.type().equals(IndexType.SECONDARY) || idx.type().equals(IndexType.FOREIGN) ) {
-                            String keyName = field.getName();
-                            
-                            if( idx.multi() != null && idx.multi().length > 0 ) {
-                                if( idx.cascade() ) {
-                                    int len = idx.multi().length;
-
-                                    keys.add(new Key(keyName));
-                                    for( int i=0; i<len; i++ ) {
-                                        String[] parts = new String[i+2];
-                                        
-                                        parts[0] = keyName;
-                                        for( int j=0; j<=i; j++ ) {
-                                            parts[j+1] = idx.multi()[j];
-                                        }
-                                        keys.add(new Key(parts));
-                                    }
-                                }
-                                else {
-                                    String[] parts = new String[idx.multi().length + 1];
-                                    int i = 1;
-                                    
-                                    parts[0] = keyName;
-                                    for( String name : idx.multi() ) {
-                                        parts[i++] = name;
-                                    }
-                                    Key k = new Key(parts);
-                                    
-                                    keys.add(k);
-                                }
-                            }
-                            else {
-                                Key k;
-                                
-                                if( idx.type().equals(IndexType.FOREIGN) && !idx.identifies().equals(CachedItem.class) ) {
-                                    k = new Key(idx.identifies(), keyName);
-                                }
-                                else {
-                                    k = new Key(keyName);
-                                }   
-                                keys.add(k);
-                            }
-                        }
-                    }
-                }
-            }
-            cls = cls.getSuperclass();
-        }
-        String propKey = "dsn.persistentCache." + className;
-        String prop;
-
-        while( cache == null && !propKey.equals("dsn.persistentCache") ) {
-            prop = props.getProperty(propKey);
-            if( prop != null ) {
-                try {
-                    cache = (PersistentCache<? extends CachedItem>)Class.forName(prop).newInstance();
-                    cache.initBase(forClass, alternateEntytName, schemaVersion, mappers, new Key(primaryKey), keys.toArray(new Key[keys.size()]));
-                    break;
-                }
-                catch( Throwable t ) {
-                    logger.error("Unable to load persistence cache " + prop + ": " + t.getMessage());
-                    throw new PersistenceException("Unable to load persistence cache " + prop + ": " + t.getMessage());
-                }
-            }
-            int idx = propKey.lastIndexOf('.');
-
-            propKey = propKey.substring(0,idx);
-        }
-        if( cache == null ) {
-            prop = props.getProperty("dsn.cache.default");
-            if( prop == null ) {
-                throw new PersistenceException("No persistent cache implementations defined.");
-            }
-            try {
-                cache = (PersistentCache<? extends CachedItem>)Class.forName(prop).newInstance();
-                cache.initBase(forClass, alternateEntytName, schemaVersion, mappers, new Key(primaryKey), keys.toArray(new Key[keys.size()]));
-            }
-            catch( Throwable t ) {
-                String err = "Unable to load persistence cache " + prop + ": " + t.getMessage();
-                logger.error(err, t);
-                throw new PersistenceException(err);
-            }
-        }
-        synchronized( caches ) {
-            PersistentCache<? extends CachedItem> c = caches.get(className);
-
-            if( c != null ) {
-                cache = c;
-            }
-            else {
-                caches.put(className, cache);
-            }
-        }
-        return cache;
+        public String joinField;
+        public String localField;
     }
 
     private ConcurrentMultiCache<T>                     cache           = null;
@@ -288,7 +55,7 @@ public abstract class PersistentCache<T extends CachedItem> {
     private String                                      schemaVersion   = null;
     private Key[]                                       secondaryKeys   = null;
 
-    public PersistentCache() { }
+    public PersistentCache() {}
 
     public String getEntityClassName() {
         return getTarget().getName();
@@ -635,7 +402,7 @@ public abstract class PersistentCache<T extends CachedItem> {
     public abstract void remove(Transaction xaction, SearchTerm ... terms) throws PersistenceException;
 
     public abstract void update(Transaction xaction, T item, Map<String,Object> state) throws PersistenceException;
-    
+
     protected void set(Map<String,Object> map, String fieldName, Object value, Class<?> type) throws PersistenceException {
         map.put(fieldName, mapValue(fieldName, value, type, null));
     }
@@ -1435,7 +1202,7 @@ public abstract class PersistentCache<T extends CachedItem> {
                 dataStoreVersion = mapper.getTargetVersion();
             }
             Class<T> targetClass = getTarget();
-            Class<? extends Object> t = targetClass;
+            Class<?> t = targetClass;
             T item = targetClass.newInstance();
 
             while( !t.getName().equals(Object.class.getName()) ) {
@@ -1467,7 +1234,7 @@ public abstract class PersistentCache<T extends CachedItem> {
             throw new PersistenceException(e.getMessage());
         }
     }
-    
+
     public void updateAll(Transaction xaction, Map<String,Object> state, SearchTerm ... terms) throws PersistenceException {
         for( T item : find(terms) ) {
             Map<String,Object> copy = new HashMap<String,Object>();
@@ -1476,134 +1243,11 @@ public abstract class PersistentCache<T extends CachedItem> {
             update(xaction, item, copy);
         }
     }
-    
+
     /**
      * Releases all held references in the cache.
      */
     public void releaseAll() {
     	getCache().releaseAll();
-    }
-
-    static public void main(String ... args) throws Exception {
-        if( args.length < 1 ) {
-            System.err.println("Invalid command, syntax: java " + PersistentCache.class.getName() + " [COMMAND] ([ARGS])");
-            System.exit(1);
-        }
-        else {
-            String cmd = args[0];
-
-            if( cmd.equalsIgnoreCase("schema") ) {
-                if( args.length < 2 ) {
-                    System.err.println("Invalid command, syntax: java " + PersistentCache.class.getName() + " schema [CLASS NAME]");
-                    System.exit(2);
-                }
-                else {
-                    PersistentCache<?> cache = PersistentCache.getCache((Class<? extends CachedItem>)Class.forName(args[1]));
-
-                    System.out.println(cache.getSchema());
-                }
-            }
-            else if( cmd.equalsIgnoreCase("reindex") ) {
-                if( args.length < 2 ) {
-                    System.err.println("Invalid command, syntax: java " + PersistentCache.class.getName() + " reindex [CLASS NAME]");
-                    System.exit(3);
-                }
-                else {
-                    PersistentCache<?> cache = PersistentCache.getCache((Class<? extends CachedItem>)Class.forName(args[1]));
-
-                    cache.reindex();
-                }
-            }
-            else if( cmd.equalsIgnoreCase("update") ) {
-                if( args.length < 4 ) {
-                    System.err.println("Syntax: java " + PersistentCache.class.getName() + " update [CLASS NAME]:[KEY VALUE] [FIELD] [VALUE]");
-                    System.exit(4);
-                }
-                else {
-                    String cname = args[1];
-                    int idx = cname.indexOf(":");
-
-                    if( idx < 1 ) {
-                        System.err.println("Invalid class/key reference: " + cname);
-                        System.exit(100);
-                    }
-                    else {
-                        PersistentCache<CachedItem> cache = (PersistentCache<CachedItem>)PersistentCache.getCache((Class<? extends CachedItem>)Class.forName(cname.substring(0, idx)));
-                        Transaction xaction = Transaction.getInstance();
-                        String keyValue = cname.substring(idx + 1);
-                        CachedItem item = cache.get(cname.substring(idx+1));
-                        Class<?> cls = item.getClass();
-                        Field field = null;
-
-                        while( field == null && !cls.getName().equals(Object.class.getName()) ) {
-                            for( Field f : cls.getDeclaredFields() ) {
-                                if( f.getName().equals(args[2]) ) {
-                                    field = f;
-                                    break;
-                                }
-                            }
-                            if( field == null ) {
-                                cls = cls.getSuperclass();
-                            }
-                        }
-                        if( field == null ) {
-                            throw new PersistenceException("No such field: " + args[2]);
-                        }
-                        cache.set(item, field, args[3]);
-
-                        Map<String,Object> state = new HashMap<String, Object>();
-                        Memento<?> memento = new Memento(item);
-
-                        memento.save(state);
-                        state = memento.getState();
-                        try {
-                            cache.update(xaction, item, state);
-                            xaction.commit();
-                        }
-                        finally {
-                            xaction.rollback();
-                        }
-                    }
-                }
-            }
-            else if( cmd.equalsIgnoreCase("help") ) {
-                if( args.length < 2 ) {
-                    System.out.println("Syntax: java " + PersistentCache.class.getName() + " [COMMAND] ([ARGS])");
-                    System.out.println("Valid commands:");
-                    System.out.println("\thelp [COMMAND]");
-                    System.out.println("\treindex [CLASS NAME]");
-                    System.out.println("\tschema [CLASS NAME]");
-                    System.out.println("\tupdate [CLASS NAME]:[KEY VALUE] [FIELD] [VALUE]");
-                }
-                else if( args[1].equalsIgnoreCase("help") ) {
-                    System.out.println("This is the help command");
-                }
-                else if( args[1].equalsIgnoreCase("schema") ) {
-                    System.out.println("Syntax: java " + PersistentCache.class.getName() + " schema [CLASS NAME]");
-                    System.out.println("Shows the schema for the specified class");
-                }
-                else if( args[1].equalsIgnoreCase("reindex") ) {
-                    System.out.println("Syntax: java " + PersistentCache.class.getName() + " reindex [CLASS NAME]");
-                    System.out.println("Re-indexes all values in a specific class. Useful if you have made changes to the class index annotations.");
-                }
-                else if( args[1].equalsIgnoreCase("update") ) {
-                    System.out.println("Syntax: java " + PersistentCache.class.getName() + " update [CLASS NAME]:[KEY VALUE] [FIELD] [VALUE]");
-                    System.out.println("Changes a value for the specified resource in the data store. KEY VALUE is the value of the target key to change. The FIELD is the name of the field to change. VALUE is the new value for FIELD");
-                }
-                else {
-                    System.err.println("Unknown command: " + args[1]);
-                    System.exit(5);
-                }
-            }
-            else {
-                System.err.println("Unknown command: " + cmd);
-                System.err.println("Valid commands:");
-                System.err.println("\thelp [COMMAND]");
-                System.err.println("\treindex [CLASS NAME]");
-                System.err.println("\tschema [CLASS NAME]");
-                System.out.println("\tupdate [CLASS NAME]:[KEY VALUE] [FIELD] [VALUE]");
-                System.exit(-1);
-            }
-        }
     }
 }

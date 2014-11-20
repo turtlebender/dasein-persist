@@ -30,20 +30,20 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
-import org.apache.log4j.Logger;
 import org.dasein.persist.PersistenceException;
 import org.dasein.persist.PersistentCache.EntityJoin;
 import org.dasein.persist.Transaction;
-import org.dasein.persist.l10n.LocalizationGroup;
 import org.dasein.util.CachedItem;
 import org.dasein.util.uom.Measured;
 import org.dasein.util.uom.UnitOfMeasure;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class Loader extends AutomatedSql {
-    static public final Logger logger = Logger.getLogger(Loader.class);
+    static public final Logger logger = LoggerFactory.getLogger(Loader.class);
     
     static public final String LISTING = "listing";
     
@@ -213,13 +213,7 @@ public class Loader extends AutomatedSql {
 
             logger.warn("SLOW QUERY: " + sql + " "+ debugTiming);
         }
-        if( isTranslating() ) {
-            for( Map<String,Object> item : list ) {
-                Object key = item.get((String)params.get("--key--"));
-                
-                item.putAll(loadStringTranslations(xaction, getTarget(), key.toString()));
-            }            
-        }
+
         return map;
     }
     
@@ -258,16 +252,6 @@ public class Loader extends AutomatedSql {
                 else {
                     ob = new Locale(parts[0]);
                 }
-            }
-        }
-        else if( type.equals(LocalizationGroup.class) ) {
-            String str = rs.getString(i);
-            
-            if( rs.wasNull() || str == null ) {
-                ob = null;
-            }
-            else {
-                ob = LocalizationGroup.valueOf(str);
             }
         }
         else if( Measured.class.isAssignableFrom(type) ) {

@@ -32,10 +32,11 @@ import org.dasein.persist.Execution;
 import org.dasein.persist.PersistenceException;
 import org.dasein.persist.Transaction;
 import org.dasein.util.Translator;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class CreateAttributes extends Execution {
-    private static final Logger logger = Logger.getLogger(CreateAttributes.class);
+    private static final Logger logger = LoggerFactory.getLogger(CreateAttributes.class);
 
     static private final int TYPE_CLASS  = 1;
     static private final int TYPE_ID     = 2;

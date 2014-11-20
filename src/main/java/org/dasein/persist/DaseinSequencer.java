@@ -25,6 +25,9 @@ package org.dasein.persist;
 // Ported to the digital@jwt code library by George Reese
 
 // J2SE imports
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -36,7 +39,6 @@ import javax.naming.InitialContext;
 import javax.naming.NamingException;
 import javax.sql.DataSource;
 
-import org.apache.log4j.Logger;
 
 /**
  * <p>
@@ -74,7 +76,7 @@ import org.apache.log4j.Logger;
  * @author George Reese
  */
 public class DaseinSequencer extends Sequencer {
-    static private final Logger logger = Logger.getLogger(DaseinSequencer.class);
+    static private final Logger logger = LoggerFactory.getLogger(DaseinSequencer.class);
     
     static private final long   defaultInterval;
 

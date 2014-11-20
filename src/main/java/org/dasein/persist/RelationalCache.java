@@ -23,7 +23,6 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.apache.log4j.Logger;
 import org.dasein.persist.jdbc.Counter;
 import org.dasein.persist.jdbc.Creator;
 import org.dasein.persist.jdbc.Deleter;
@@ -38,9 +37,14 @@ import org.dasein.util.DaseinUtilTasks;
 import org.dasein.util.JitCollection;
 import org.dasein.util.Jiterator;
 import org.dasein.util.JiteratorFilter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nonnull;
+import javax.sql.DataSource;
 
 public final class RelationalCache<T extends CachedItem> extends PersistentCache<T> {
-    static public final Logger logger = Logger.getLogger(RelationalCache.class);
+    static public final Logger logger = LoggerFactory.getLogger(RelationalCache.class);
 
     static public class OrderedColumn {
         public String  column;
@@ -50,8 +54,11 @@ public final class RelationalCache<T extends CachedItem> extends PersistentCache
     private String            readDataSource    = null;
     private TranslationMethod translationMethod = TranslationMethod.NONE;
     private String            writeDataSource   = null;
-    
-    public RelationalCache() { }
+    private final DataSource        ds;
+
+    public RelationalCache(DataSource ds) {
+        this.ds = ds;
+    }
     
     /**
      * Constructs a new persistent factory for objects of the specified class with 
@@ -77,31 +84,30 @@ public final class RelationalCache<T extends CachedItem> extends PersistentCache
     private Counter getCounter(SearchTerm[] whereTerms) {
         final SearchTerm[] terms = whereTerms;
         final RelationalCache<T> self = this;
-        
-        Counter counter = new Counter() {
+
+        return new Counter() {
             public void init() {
                 setTarget(self.getEntityClassName());
                 if( terms != null && terms.length > 0 ) {
                     ArrayList<Criterion> criteria = new ArrayList<Criterion>();
-                
+
                     for( SearchTerm term : terms ) {
                         criteria.add(new Criterion(term.getColumn(), term.getOperator()));
                     }
                     setCriteria(criteria.toArray(new Criterion[criteria.size()]));
                 }
             }
-            
+
             public boolean isReadOnly() {
                 return true;
             }
         };
-        return counter;
     }
     
     private Creator getCreator() {
         final RelationalCache<T> self = this;
-        
-        Creator creator = new Creator() {
+
+        return new Creator() {
             public void init() {
                 setTarget(self.getEntityClassName());
                 switch (translationMethod) {
@@ -110,59 +116,57 @@ public final class RelationalCache<T extends CachedItem> extends PersistentCache
                 case NONE: setTranslating(false); break;
                 }
             }
-            
+
             public boolean isReadOnly() {
                 return false;
             }
         };
-        return creator;
     }
     
     private Deleter getDeleter(SearchTerm ... terms) {
         final SearchTerm[] killTerms = terms;
         final RelationalCache<T> self = this;
-        
-        Deleter deleter = new Deleter() {
+
+        return new Deleter() {
             public void init() {
                 setTarget(self.getEntityClassName());
                 if( killTerms != null && killTerms.length > 0 ) {
                     ArrayList<Criterion> criteria = new ArrayList<Criterion>();
-                
+
                     for( SearchTerm term : killTerms ) {
                         criteria.add(new Criterion(term.getJoinEntity(), term.getColumn(), term.getOperator()));
                     }
                     setCriteria(criteria.toArray(new Criterion[criteria.size()]));
                 }
                 else {
-                    setCriteria(self.getPrimaryKey().getFields());                    
+                    setCriteria(self.getPrimaryKey().getFields());
                 }
                 switch (translationMethod) {
                 case CUSTOM: setCustomTranslating(); break;
                 case STANDARD: setTranslating(true); break;
                 case NONE: setTranslating(false); break;
                 }
-                
+
             }
-            
+
             public boolean isReadOnly() {
                 return false;
             }
         };
-        return deleter;
     }
     
     private Loader getLoader(SearchTerm[] whereTerms, OrderedColumn[] orderBy) {
         final SearchTerm[] terms = whereTerms;
         final OrderedColumn[] order = orderBy;
         final RelationalCache<T> self = this;
-        
-        Loader loader = new Loader() {
+
+        return new Loader() {
             public void init() {
                 setTarget(self.getEntityClassName());
                 setEntityJoins(getJoins());
                 if( terms != null && terms.length > 0 ) {
                     ArrayList<Criterion> criteria = new ArrayList<Criterion>();
-                
+
                     for( SearchTerm term : terms ) {
                         criteria.add(new Criterion(term.getJoinEntity(), term.getColumn(), term.getOperator()));
                     }
@@ -171,7 +175,7 @@ public final class RelationalCache<T extends CachedItem> extends PersistentCache
                 if( order != null && order.length > 0 ) {
                     ArrayList<String> cols = new ArrayList<String>();
                     boolean desc = order[0].descending;
-                    
+
                     for( OrderedColumn col : order ) {
                         cols.add(col.column);
                     }
@@ -183,18 +187,17 @@ public final class RelationalCache<T extends CachedItem> extends PersistentCache
                 case NONE: setTranslating(false); break;
                 }
             }
-            
+
             public boolean isReadOnly() {
                 return true;
             }
         };
-        return loader;
     }
     
     private Updater getUpdater() {
         final RelationalCache<T> self = this;
-        
-        Updater updater = new Updater() {
+
+        return new Updater() {
             public void init() {
                 setTarget(self.getEntityClassName());
                 setCriteria(self.getPrimaryKey().getFields());
@@ -204,12 +207,11 @@ public final class RelationalCache<T extends CachedItem> extends PersistentCache
                 case NONE: setTranslating(false); break;
                 }
             }
-            
+
             public boolean isReadOnly() {
                 return false;
             }
         };
-        return updater;
     }
     
     /**
@@ -221,7 +223,7 @@ public final class RelationalCache<T extends CachedItem> extends PersistentCache
     public long count() throws PersistenceException {
         logger.debug("enter - count()");
         try {
-            Transaction xaction = Transaction.getInstance(true);
+            Transaction xaction = Transaction.getInstance(ds, true);
             Counter counter = getCounter(null);            
             
             try {
@@ -246,7 +248,7 @@ public final class RelationalCache<T extends CachedItem> extends PersistentCache
     public long count(SearchTerm ... terms) throws PersistenceException {
         logger.debug("enter - count(SearchTerm...)");
         try {
-            Transaction xaction = Transaction.getInstance(true);
+            Transaction xaction = Transaction.getInstance(ds, true);
             Counter counter = getCounter(terms);            
             
             try {
@@ -284,7 +286,8 @@ public final class RelationalCache<T extends CachedItem> extends PersistentCache
     }
     
     @Override
-    public Collection<T> find(SearchTerm[] terms, JiteratorFilter<T> filter, Boolean orderDesc, String ... orderFields) throws PersistenceException {
+    @Nonnull
+    public Collection<T> find(@Nonnull SearchTerm[] terms, JiteratorFilter<T> filter, Boolean orderDesc, String ... orderFields) throws PersistenceException {
         logger.debug("enter - find(SearchTerm[], JiteratorFilter, Boolean, String)");
         try {
             OrderedColumn[] order;
@@ -376,14 +379,8 @@ public final class RelationalCache<T extends CachedItem> extends PersistentCache
 
     @Override
     public String getSchema() throws PersistenceException {
-        StringBuilder schema = new StringBuilder();
 
-        schema.append("CREATE TABLE ");
-        schema.append(getSqlNameForClassName(getEntityClassName()));
-        schema.append(" (");
-
-        schema.append(");");
-        return schema.toString();
+        return "CREATE TABLE " + getSqlNameForClassName(getEntityClassName()) + " (" + ");";
     }
 
     protected String getSqlName(String nom) {
@@ -409,7 +406,7 @@ public final class RelationalCache<T extends CachedItem> extends PersistentCache
         String[] parts = cname.split("\\.");
         int i;
 
-        if( parts != null && parts.length > 1 ) {
+        if( parts.length > 1 ) {
             cname = parts[parts.length-1];
         }
         i = cname.lastIndexOf("$");
@@ -429,7 +426,7 @@ public final class RelationalCache<T extends CachedItem> extends PersistentCache
     public Collection<T> list() throws PersistenceException {
         logger.debug("enter - list()");
         try {
-            return find(null, null, false);
+            return find(new SearchTerm[]{}, null, false);
         }
         finally {
             logger.debug("exit - list()");
@@ -484,7 +481,7 @@ public final class RelationalCache<T extends CachedItem> extends PersistentCache
     private Collection<T> load(Loader loader, JiteratorFilter<T> filter, Map<String,Object> params) throws PersistenceException {
         logger.debug("enter - load(Class,SearchTerm...)");
         try {
-            Transaction xaction = Transaction.getInstance(true);
+            Transaction xaction = Transaction.getInstance(ds, true);
             final Jiterator<T> it = new Jiterator<T>(filter);
 
             params.put("--key--", getPrimaryKey().getFields()[0]);

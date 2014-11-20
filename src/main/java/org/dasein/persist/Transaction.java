@@ -38,17 +38,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 // J2EE imports
-import javax.naming.InitialContext;
-import javax.naming.NamingException;
 import javax.sql.DataSource;
 
 // Apache imports
-import org.apache.log4j.Logger;
 import org.dasein.util.DaseinUtilTasks;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Represents a database transaction to applications managing their
- * own transactions. To use this class, call <code>getInstance()</code>
+ * own transactions. To use this class, call <code>getTransaction()</code>
  * to get a transaction and pass that transaction to all
  * <code>Execution</code> objects that need to execute in the same
  * transaction context.
@@ -58,7 +57,7 @@ import org.dasein.util.DaseinUtilTasks;
  * @author George Reese
  */
 public class Transaction {
-    static private final Logger logger = Logger.getLogger(Transaction.class);
+    static private final Logger logger = LoggerFactory.getLogger(Transaction.class);
 
     /**
      * A count of open connections.
@@ -156,16 +155,16 @@ public class Transaction {
      * context.
      * @return the transaction for your new transaction context
      */
-    static public Transaction getInstance() {
-        return getInstance(false);
+    static protected Transaction getInstance(DataSource ds) {
+        return getInstance(ds, false);
     }
     
-    static public Transaction getInstance(boolean readOnly) {        
+    static protected Transaction getInstance(DataSource ds, boolean readOnly) {
         final int xid = nextTransactionId.incrementAndGet();
         if( xid == Integer.MAX_VALUE ) { // contention here will cause a few screwy values
             nextTransactionId.set(0);
         }
-        Transaction xaction = new Transaction(xid, readOnly);
+        Transaction xaction = new Transaction(ds, xid, readOnly);
         if (maidLaunched.compareAndSet(false, true)) {
             loadProperties();
             if (!isMaidDisabled()) {
@@ -226,15 +225,18 @@ public class Transaction {
 
     private StackTraceElement[] stackTrace;
 
+    private DataSource ds;
+
     /**
      * Constructs a transaction object having the specified transaction ID.
      * @param xid the transaction ID that identifies the transaction
      * @param readOnly true if the transaction is just for reading.
      */
-    private Transaction(int xid, boolean readOnly) {
+    protected Transaction(DataSource ds, int xid, boolean readOnly) {
         super();
         transactionId = xid;
         this.readOnly = readOnly;
+        this.ds = ds;
     }
     
     /**
@@ -339,7 +341,7 @@ public class Transaction {
                 Map<String,Object> res;
                 
                 if( connection == null ) {
-                    open(event, dsn);
+                    open(dsn);
                 }
                 /*
                 stateargs = event.loadStatement(connection, args);
@@ -420,7 +422,7 @@ public class Transaction {
                 Map<String,Object> res;
                 
                 if( connection == null ) {
-                    open(event, dsn);
+                    open(dsn);
                 }
                 //stateargs = event.loadStatement(connection, args);
                 state = "EXECUTING " + event.getClass().getName();
@@ -536,60 +538,28 @@ public class Transaction {
     }
     
     /**
-     * Opens a connection for the specified execution.
-     * @param event the event causing the open
-     * @throws SQLException
+     * Opens a connection for the specified execution.     * @throws SQLException
      * @throws PersistenceException
      */
-    private synchronized void open(Execution event, String dsn) throws SQLException, PersistenceException {
-        try {
-            Connection conn;
-            
-            if( connection != null ) {
-                return;
-            }
-            state = "OPENING";
-            try {
-                InitialContext ctx = new InitialContext();
-                DataSource ds;
-                
-                if( dsn == null ) {
-                    dsn = event.getDataSource();
-                }
-                if (dsn == null) {
-                    throw new PersistenceException("No data source name");
-                }
-                state = "LOOKING UP";
-                ds = dsCache.get(dsn);
-                if (ds == null) {
-                    ds = (DataSource)ctx.lookup(dsn);
-                    if (ds != null) {
-                        dsCache.put(dsn, ds);
-                    }
-                }
-                if (ds == null) {
-                    throw new PersistenceException("Could not find data source: " + dsn);
-                }
-                conn = ds.getConnection();
-                openTime = System.currentTimeMillis();
-                if( logger.isDebugEnabled() ) {
-                    logger.debug("DPTRANSID-" + transactionId + " connection.get - dsn='" + dsn + '\'');
-                }
-                state = "CONNECTED";
-            }
-            catch( NamingException e ) {
-                logger.error("Problem with datasource: " + e.getMessage());
-                throw new PersistenceException(e.getMessage());
-            }
-            conn.setAutoCommit(false);
-            conn.setReadOnly(readOnly);
-            connection = conn;
-            if (tracking) {
-                connections.incrementAndGet();
-                transactions.put(new Integer(transactionId), this);
-            }
+    private synchronized void open(String dsn) throws SQLException, PersistenceException {
+        Connection conn;
+
+        if( connection != null ) {
+            return;
         }
-        finally {
+        state = "OPENING";
+        conn = ds.getConnection();
+        openTime = System.currentTimeMillis();
+        if( logger.isDebugEnabled() ) {
+            logger.debug("DPTRANSID-" + transactionId + " connection.get - dsn='" + dsn + '\'');
+        }
+        state = "CONNECTED";
+        conn.setAutoCommit(false);
+        conn.setReadOnly(readOnly);
+        connection = conn;
+        if (tracking) {
+            connections.incrementAndGet();
+            transactions.put(transactionId, this);
         }
     }
 

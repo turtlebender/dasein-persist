@@ -24,9 +24,7 @@ import java.util.Map;
 
 import org.dasein.attributes.AttributeMap;
 import org.dasein.attributes.DataTypeMap;
-import org.dasein.persist.Execution;
-import org.dasein.persist.PersistenceException;
-import org.dasein.persist.Transaction;
+import org.dasein.persist.*;
 
 public class AttributeDAO {
     static public final String ATTRIBUTES  = "attributes";
@@ -69,8 +67,8 @@ public class AttributeDAO {
         xaction.execute(CreateTypes.class, state);
     }
     
-    public AttributeMap loadAttributes(Class cls, String oid) throws PersistenceException {
-        Transaction xaction = Transaction.getInstance();
+    public AttributeMap loadAttributes(DaseinPersist factory, Class cls, String oid) throws PersistenceException {
+        Transaction xaction = factory.getTransaction();
         
         try {
             Map<String,Object> state = new HashMap<String,Object>();
@@ -86,8 +84,8 @@ public class AttributeDAO {
         }
     }
 
-    public DataTypeMap loadTypes(Class cls, String oid) throws PersistenceException {
-        Transaction xaction = Transaction.getInstance();
+    public DataTypeMap loadTypes(DaseinPersist factory, Class cls, String oid) throws PersistenceException {
+        Transaction xaction = factory.getTransaction();
         
         try {
             DataTypeMap types = loadTypes(xaction, cls, oid);
@@ -126,8 +124,8 @@ public class AttributeDAO {
     }
     
     @SuppressWarnings({ "unchecked", "rawtypes" })
-	public Collection<String> findOwnerId(Class cls, String name, String value) throws PersistenceException {
-    	Transaction xaction = Transaction.getInstance();
+	public Collection<String> findOwnerId(DaseinPersist factory, Class cls, String name, String value) throws PersistenceException {
+    	Transaction xaction = factory.getTransaction();
         
         try {
 	    	 Map<String,Object> state = new HashMap<String,Object>();

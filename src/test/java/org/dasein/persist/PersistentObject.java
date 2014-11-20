@@ -29,78 +29,59 @@ import org.dasein.util.CachedItem;
 public class PersistentObject implements CachedItem, Comparable<PersistentObject> {
     private double amount;
     private Currency currency;
-    @Index(type=IndexType.PRIMARY)
+    @Index(type = IndexType.PRIMARY)
     private long keyField;
-    @Index(type=IndexType.SECONDARY)
+    @Index(type = IndexType.SECONDARY)
     private String name;
     private String description;
-    @Index(type=IndexType.SECONDARY)
-    private IndexType indexType;
-    @Index(type=IndexType.FOREIGN, identifies=OtherObject.class)
-    private Long otherObject;
-    private JSONMapped mapped;
 
-    @Index( type=IndexType.SECONDARY, cascade = true, multi={"indexB"})
-    private String indexA;
-    private String indexB;
-    private String indexC;
-
-    public PersistentObject() { }
-    
-    public boolean equals(Object ob) {
-        if( ob == null ) {
-            return false;
-        }
-        if( !(ob instanceof PersistentObject) ) {
-            return false;
-        }
-        return (keyField == ((PersistentObject)ob).keyField);
+    public PersistentObject() {
     }
-    
+
+    public boolean equals(Object ob) {
+        if (ob == null) {
+            return false;
+        }
+        if (!(ob instanceof PersistentObject)) {
+            return false;
+        }
+        return (keyField == ((PersistentObject) ob).keyField);
+    }
+
     public double getAmount() {
         return amount;
     }
-    
+
     public Currency getCurrency() {
         return currency;
     }
-    
+
     public long getKeyField() {
         return keyField;
     }
-    
-    public IndexType getIndexType() {
-        return indexType;
-    }
-    
+
+
     public String getName() {
         return name;
     }
-    
+
     public String getDescription() {
         return description;
     }
 
-    public JSONMapped getMapped() {
-        return mapped;
-    }
 
-    public long getOtherObjectId() {
-        return (otherObject == null ? -1L : otherObject.longValue());
-    }
-    
     private transient volatile boolean valid = true;
-    
+
     public void invalidate() {
         valid = false;
     }
-    
+
     @Override
     public boolean isValidForCache() {
         return valid;
     }
-    
-    public String toString() { 
+
+    public String toString() {
         return ("[#" + keyField + " - " + getName() + "]");
     }
 
@@ -109,15 +90,4 @@ public class PersistentObject implements CachedItem, Comparable<PersistentObject
         return getName().compareTo(other.getName());
     }
 
-    public String getIndexA() {
-        return indexA;
-    }
-
-    public String getIndexB() {
-        return indexB;
-    }
-
-    public String getIndexC() {
-        return indexC;
-    }
 }

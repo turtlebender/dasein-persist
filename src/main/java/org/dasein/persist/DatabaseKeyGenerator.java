@@ -18,6 +18,9 @@
 
 package org.dasein.persist;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -29,7 +32,6 @@ import javax.naming.InitialContext;
 import javax.naming.NamingException;
 import javax.sql.DataSource;
 
-import org.apache.log4j.Logger;
 
 public class DatabaseKeyGenerator extends Sequencer {
     static private final long    defaultInterval;
@@ -79,7 +81,7 @@ public class DatabaseKeyGenerator extends Sequencer {
             }
         }
         catch( Exception e ) {
-            Logger.getLogger(DatabaseKeyGenerator.class).error("Problem loading " + PROPERTIES + ": " + e.getMessage(), e);
+            LoggerFactory.getLogger(DatabaseKeyGenerator.class).error("Problem loading " + PROPERTIES + ": " + e.getMessage(), e);
         }
         dsn = props.getProperty("dasein.seqdsn");
         dataSourceName = dsn;
@@ -112,7 +114,7 @@ public class DatabaseKeyGenerator extends Sequencer {
     
     private Logger getLogger() {
         if( logger == null ) {
-            logger = Logger.getLogger("org.dasein.sequencer." + getName());
+            logger = LoggerFactory.getLogger("org.dasein.sequencer." + getName());
         }
         return logger;
     }
